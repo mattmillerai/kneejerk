@@ -5,10 +5,47 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestVersionString(t *testing.T) {
+	if got, want := versionString(), "kneejerk dev"; got != want {
+		t.Errorf("versionString() = %q, want %q", got, want)
+	}
+
+	old := version
+	version = "1.2.3"
+	defer func() { version = old }()
+
+	if got, want := versionString(), "kneejerk 1.2.3"; got != want {
+		t.Errorf("versionString() = %q, want %q", got, want)
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping binary build in -short mode")
+	}
+
+	bin := filepath.Join(t.TempDir(), "kneejerk")
+	build := exec.Command("go", "build", "-ldflags", "-X main.version=1.2.3", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, out)
+	}
+
+	out, err := exec.Command(bin, "-version").Output()
+	if err != nil {
+		t.Fatalf("running binary failed: %v", err)
+	}
+
+	if got, want := strings.TrimSpace(string(out)), "kneejerk 1.2.3"; got != want {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+}
 
 func TestExtractBaseDomain(t *testing.T) {
 	tests := []struct {

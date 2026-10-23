@@ -1,0 +1,79 @@
+name: Weekly govulncheck
+
+on:
+  schedule:
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run govulncheck
+        id: govulncheck
+        shell: bash
+        run: |
+          set +e
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1 | tee govulncheck-output.txt
+          status=${PIPESTATUS[0]}
+          {
+            echo "## govulncheck results"
+            echo
+            echo '```text'
+            cat govulncheck-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 0 ]; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: File or update tracking issue
+        if: steps.govulncheck.outputs.failed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -e
+
+          gh label create security --color B60205 --description "Security vulnerability" --force
+
+          title='govulncheck: vulnerabilities found on main'
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          {
+            echo "Weekly govulncheck found vulnerabilities on \`main\`."
+            echo
+            echo "Run: $run_url"
+            echo
+            echo '```text'
+            head -c 60000 govulncheck-output.txt
+            echo
+            echo '```'
+          } > issue-body.txt
+
+          issue_number=$(gh issue list --label security --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+
+          if [ -n "$issue_number" ] && [ "$issue_number" != "null" ]; then
+            gh issue comment "$issue_number" --body-file issue-body.txt
+          else
+            gh issue create --title "$title" --label security --body-file issue-body.txt
+          fi
+
+      - name: Fail job on vulnerabilities
+        if: steps.govulncheck.outputs.failed == 'true'
+        run: exit 1
