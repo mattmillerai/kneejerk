@@ -17,16 +17,17 @@ import (
 	"time"
 )
 
-// ASCII Banner
+// ASCII Banner. The version line below "|__/" is rendered separately at
+// runtime by bannerVersionLine so the banner always shows the real build
+// version instead of a hardcoded one.
 const banner = `
- _  __                _           _    
-| |/ /               (_)         | |   
+ _  __                _           _
+| |/ /               (_)         | |
 | ' / _ __   ___  ___ _  ___ _ __| | __
 |  < | '_ \ / _ \/ _ | |/ _ | '__| |/ /
-| . \| | | |  __|  __| |  __| |  |   < 
-|_|\_|_| |_|\___|\___| |\___|_|  |_|\_\              
-                    |__/                
-                               v0.3
+| . \| | | |  __|  __| |  __| |  |   <
+|_|\_|_| |_|\___|\___| |\___|_|  |_|\_\
+                    |__/
 `
 
 // version is overridden at build time for release binaries via
@@ -35,6 +36,21 @@ var version = "dev"
 
 func versionString() string {
 	return "kneejerk " + version
+}
+
+// bannerVersionLine renders the version line printed under the banner,
+// keeping the same left padding the banner used when "v0.3" was hardcoded.
+func bannerVersionLine() string {
+	label := version
+	if label != "dev" {
+		label = "v" + label
+	}
+	return strings.Repeat(" ", 31) + label
+}
+
+func printBanner() {
+	fmt.Print(banner)
+	fmt.Println(bannerVersionLine())
 }
 
 const maxResponseSize = 50 * 1024 * 1024 // cap JS/sourcemap downloads at 50 MB
@@ -415,7 +431,7 @@ func main() {
 		return
 	}
 
-	fmt.Print(banner)
+	printBanner()
 
 	if *insecure {
 		httpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}

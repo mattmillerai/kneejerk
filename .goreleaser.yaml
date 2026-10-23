@@ -1,0 +1,53 @@
+# The Homebrew tap (mattmillerai/homebrew-tap) ships a source-built formula
+# that compiles kneejerk with `go build` from the source tarball rather than
+# downloading a release binary, so there is no brews/homebrew_casks section
+# here. The tap's formula is instead bumped to the new version/tag by the
+# "homebrew" job in .github/workflows/release.yml. There are also no
+# nfpms/snapcraft sections, since this project isn't packaged for Linux
+# package managers.
+version: 2
+
+project_name: kneejerk
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: kneejerk
+    main: ./cmd/kneejerk
+    binary: kneejerk
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: mattmillerai
+    name: kneejerk
+  mode: keep-existing
+  draft: false
+  replace_existing_artifacts: true

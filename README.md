@@ -126,7 +126,7 @@ optional arguments:
 
 ## Contributing
 
-I welcome contributions from the community! If you have any suggestions, bug reports, or ideas for improvement, feel free to open an issue or submit a pull request.
+I welcome contributions from the community! If you have any suggestions, bug reports, or ideas for improvement, feel free to open an issue or submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for commit/PR title conventions and how releases are cut.
 
 ## Support the project
 

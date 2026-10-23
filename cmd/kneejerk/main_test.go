@@ -26,6 +26,21 @@ func TestVersionString(t *testing.T) {
 	}
 }
 
+func TestBannerVersionLine(t *testing.T) {
+	old := version
+	defer func() { version = old }()
+
+	version = "dev"
+	if got, want := bannerVersionLine(), strings.Repeat(" ", 31)+"dev"; got != want {
+		t.Errorf("bannerVersionLine() = %q, want %q", got, want)
+	}
+
+	version = "0.3.1"
+	if got, want := bannerVersionLine(), strings.Repeat(" ", 31)+"v0.3.1"; got != want {
+		t.Errorf("bannerVersionLine() = %q, want %q", got, want)
+	}
+}
+
 func TestVersionFlag(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping binary build in -short mode")
