@@ -13,20 +13,27 @@ Kneejerk is a pentesting command line tool for scanning environment variables an
 ### Homebrew (macOS/Linux)
 
 ```sh
-brew install MillerMedia/tap/kneejerk
+brew install mattmillerai/tap/kneejerk
 ```
 
 ### Go Install
 
 ```sh
-go install -v github.com/MillerMedia/kneejerk/cmd/kneejerk@latest
+go install -v github.com/mattmillerai/kneejerk/cmd/kneejerk@latest
 ```
+
+> Versions <= v0.3.1 were published under the module path `github.com/MillerMedia/kneejerk`. `go install .../kneejerk@latest` will reject that old path with a module path mismatch error — switch to `github.com/mattmillerai/kneejerk` as shown above.
 
 ## Usage
 
 #### Single URL
 ```bash
 kneejerk -u https://www.example.com -o output.txt
+```
+
+#### Version
+```bash
+kneejerk -version
 ```
 
 #### Using with [nuclei](https://github.com/projectdiscovery/nuclei)
@@ -113,6 +120,8 @@ optional arguments:
         URL of the website to scan
   -ua string
         User-Agent header to send
+  -version
+        Print the version and exit
 ```
 
 ## Contributing

@@ -1,4 +1,4 @@
-module github.com/MillerMedia/kneejerk
+module github.com/mattmillerai/kneejerk
 
 go 1.26.10
 

@@ -29,6 +29,14 @@ const banner = `
                                v0.3
 `
 
+// version is overridden at build time for release binaries via
+// -ldflags "-X main.version=...".
+var version = "dev"
+
+func versionString() string {
+	return "kneejerk " + version
+}
+
 const maxResponseSize = 50 * 1024 * 1024 // cap JS/sourcemap downloads at 50 MB
 
 // Browser-shaped UA so basic WAFs don't reject the default Go-http-client/1.1.
@@ -391,8 +399,6 @@ func scrapeJSFiles(u string, debug bool) {
 }
 
 func main() {
-	fmt.Print(banner)
-
 	url := flag.String("u", "", "URL of the website to scan")
 	list := flag.String("l", "", "Path to a file containing a list of URLs to scan")
 	output := flag.String("o", "", "Path to output file")
@@ -401,7 +407,15 @@ func main() {
 	ua := flag.String("ua", defaultUserAgent, "User-Agent header to send")
 	cookie := flag.String("cookie", "", "Cookie header value to send (e.g. cf_clearance=... from a browser session)")
 	domain := flag.String("domain", "", "Target domain for classifying hostnames found in JS (default: inferred from each scanned URL)")
+	showVersion := flag.Bool("version", false, "Print the version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(versionString())
+		return
+	}
+
+	fmt.Print(banner)
 
 	if *insecure {
 		httpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
