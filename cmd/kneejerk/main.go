@@ -10,6 +10,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -25,7 +26,7 @@ const banner = `
 | . \| | | |  __|  __| |  __| |  |   < 
 |_|\_|_| |_|\___|\___| |\___|_|  |_|\_\              
                     |__/                
-                               v0.2
+                               v0.3
 `
 
 const maxResponseSize = 50 * 1024 * 1024 // cap JS/sourcemap downloads at 50 MB
@@ -61,6 +62,133 @@ var apiPathPattern = regexp.MustCompile(`"(GET|POST|PUT|DELETE|PATCH)",\s*"(/[^"
 var sourceMapURLPattern = regexp.MustCompile(`(?m)^//[#@]\s*sourceMappingURL=([^\s]+)\s*$`)
 
 var foundVars = map[string]struct{}{}
+
+// Optional -domain override for which hosts count as the target's own.
+// Empty means infer it from each scanned URL.
+var domainOverride string
+
+// scanTarget describes the site being scanned, for classifying hostnames
+// referenced in its JS.
+type scanTarget struct {
+	host       string         // hostname of the scanned page, never reported
+	domain     string         // hosts equal to or under this are the target's own
+	bareHostRE *regexp.Regexp // matches scheme-less hostnames under domain
+}
+
+func newScanTarget(pageURL string, domain string) scanTarget {
+	var t scanTarget
+	if u, err := url.Parse(pageURL); err == nil {
+		t.host = strings.ToLower(u.Hostname())
+	}
+	t.domain = normalizeDomain(domain)
+	if t.domain == "" {
+		t.domain = extractBaseDomain(t.host)
+	}
+	if t.domain != "" {
+		// The leading delimiter is consumed so adjacent matches still work;
+		// "@" is excluded so email addresses don't count as host references.
+		t.bareHostRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9.@_-])((?:[a-z0-9-]+\.)*` + regexp.QuoteMeta(t.domain) + `)`)
+	}
+	return t
+}
+
+// Absolute http(s)/ws(s) URLs. Captures the hostname and the first path
+// segment (needed to name the bucket in path-style storage URLs).
+var absoluteURLPattern = regexp.MustCompile("(?i)\\b(?:https?|wss?)://((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63})(?::\\d{1,5})?(?:/([^\\s\"'`/?#\\\\]*))?")
+
+// s3:// and gs:// bucket URIs, whose bucket names needn't contain a dot.
+var bucketURIPattern = regexp.MustCompile(`(?i)\b(s3|gs)://([a-z0-9][a-z0-9._-]{1,61}[a-z0-9])`)
+
+type hostFinding struct {
+	outputType string // "domain" or "bucket"
+	severity   string
+	value      string
+}
+
+// continuesHostname reports whether the character at s[i] would extend a
+// hostname that ended just before it, e.g. "example.com" inside
+// "example.community" or "example.com.evil.net".
+func continuesHostname(s string, i int) bool {
+	if i >= len(s) {
+		return false
+	}
+	isHostChar := func(c byte) bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_'
+	}
+	if isHostChar(s[i]) {
+		return true
+	}
+	return s[i] == '.' && i+1 < len(s) && isHostChar(s[i+1])
+}
+
+// extractHosts finds hostnames and cloud buckets referenced in jsContent and
+// classifies them against the scan target. Results are unique and in order
+// of first appearance.
+func extractHosts(jsContent string, t scanTarget) []hostFinding {
+	var findings []hostFinding
+	seen := map[hostFinding]bool{}
+	add := func(f hostFinding) {
+		if !seen[f] {
+			seen[f] = true
+			findings = append(findings, f)
+		}
+	}
+
+	addHost := func(host, firstPathSegment string) {
+		host = strings.ToLower(host)
+		if !validHostnamePattern.MatchString(host) {
+			return
+		}
+		if ref, ok := bucketRef(host, firstPathSegment); ok {
+			add(hostFinding{"bucket", "medium", ref})
+			return
+		}
+		if severity, ok := classifyHost(host, t); ok {
+			add(hostFinding{"domain", severity, host})
+		}
+	}
+
+	for _, m := range absoluteURLPattern.FindAllStringSubmatchIndex(jsContent, -1) {
+		if continuesHostname(jsContent, m[3]) {
+			continue
+		}
+		var firstPathSegment string
+		if m[4] >= 0 {
+			firstPathSegment = jsContent[m[4]:m[5]]
+		}
+		addHost(jsContent[m[2]:m[3]], firstPathSegment)
+	}
+
+	for _, m := range bucketURIPattern.FindAllStringSubmatch(jsContent, -1) {
+		add(hostFinding{"bucket", "medium", strings.ToLower(m[1] + "://" + m[2])})
+	}
+
+	if t.bareHostRE != nil {
+		for _, m := range t.bareHostRE.FindAllStringSubmatchIndex(jsContent, -1) {
+			if continuesHostname(jsContent, m[3]) {
+				continue
+			}
+			addHost(jsContent[m[2]:m[3]], "")
+		}
+	}
+
+	return findings
+}
+
+func scrapeHostnames(jsURL string, jsContent string, t scanTarget, debug bool) {
+	debugLog(debug, "Debug: Scanning for hostnames in %s (domain %s)...\n", jsURL, t.domain)
+
+	for _, f := range extractHosts(jsContent, t) {
+		key := f.outputType + ":" + f.value
+		if _, ok := foundVars[key]; ok {
+			continue
+		}
+		foundVars[key] = struct{}{}
+		coloredMessage, uncoloredMessage := colorizeMessage("kneejerk", f.outputType, f.severity, jsURL, f.value)
+		fmt.Println(coloredMessage)
+		writeOutput(uncoloredMessage)
+	}
+}
 
 var outputFileWriter *bufio.Writer = nil
 
@@ -198,6 +326,7 @@ func scrapeJSFiles(u string, debug bool) {
 		return
 	}
 
+	target := newScanTarget(cleanUrl, domainOverride)
 	processedJs := make(map[string]bool)
 
 	doc.Find("script").Each(func(i int, s *goquery.Selection) {
@@ -221,6 +350,7 @@ func scrapeJSFiles(u string, debug bool) {
 		cleanJsContent := removeANSI(string(jsContent))
 		scrapeEnvVars(jsURL, cleanJsContent)
 		scrapeAPIPaths(jsURL, cleanJsContent, debug)
+		scrapeHostnames(jsURL, cleanJsContent, target, debug)
 
 		mapMatch := sourceMapURLPattern.FindStringSubmatch(cleanJsContent)
 		if mapMatch == nil {
@@ -255,6 +385,7 @@ func scrapeJSFiles(u string, debug bool) {
 			cleanSourceContent := removeANSI(sourceContent)
 			scrapeEnvVars(mapFileUrl, cleanSourceContent)
 			scrapeAPIPaths(mapFileUrl, cleanSourceContent, debug)
+			scrapeHostnames(mapFileUrl, cleanSourceContent, target, debug)
 		}
 	})
 }
@@ -269,6 +400,7 @@ func main() {
 	insecure := flag.Bool("k", false, "Skip TLS certificate verification (insecure)")
 	ua := flag.String("ua", defaultUserAgent, "User-Agent header to send")
 	cookie := flag.String("cookie", "", "Cookie header value to send (e.g. cf_clearance=... from a browser session)")
+	domain := flag.String("domain", "", "Target domain for classifying hostnames found in JS (default: inferred from each scanned URL)")
 	flag.Parse()
 
 	if *insecure {
@@ -276,6 +408,7 @@ func main() {
 	}
 	userAgent = *ua
 	cookieHeader = *cookie
+	domainOverride = *domain
 
 	if *output != "" {
 		file, err := os.Create(*output)

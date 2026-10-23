@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"github.com/logrusorgru/aurora"
+	"golang.org/x/net/publicsuffix"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -111,27 +113,6 @@ func urlJoin(baseURL string, relURL string) string {
 	return u.ResolveReference(rel).String()
 }
 
-func isSameBaseDomain(url1, url2 string) bool {
-	u1, err1 := url.Parse(url1)
-	u2, err2 := url.Parse(url2)
-
-	if err1 != nil || err2 != nil {
-		return false
-	}
-
-	host1Parts := strings.Split(u1.Host, ".")
-	host2Parts := strings.Split(u2.Host, ".")
-
-	if len(host1Parts) < 2 || len(host2Parts) < 2 {
-		return false
-	}
-
-	domain1 := host1Parts[len(host1Parts)-2] + "." + host1Parts[len(host1Parts)-1]
-	domain2 := host2Parts[len(host2Parts)-2] + "." + host2Parts[len(host2Parts)-1]
-
-	return domain1 == domain2
-}
-
 func printAPI(debug bool, jsURL string, method string, endpoint string) {
 	if len(method) > 12 {
 		debugLog(debug, "Debug: Ignoring API path due to method length (possible false positive): [%s, %s]\n", method, endpoint)
@@ -160,11 +141,98 @@ func printAPI(debug bool, jsURL string, method string, endpoint string) {
 	writeOutput(uncoloredMessage)
 }
 
-// This function takes a hostname and returns its base domain.
+// extractBaseDomain returns the registrable domain (eTLD+1) for a hostname,
+// so "api.example.co.uk" maps to "example.co.uk" rather than "co.uk". Ports
+// are stripped, and IPs and single-label hosts are returned unchanged.
 func extractBaseDomain(hostname string) string {
-	parts := strings.Split(hostname, ".")
-	if len(parts) <= 2 {
-		return hostname
+	host := strings.ToLower(strings.TrimSuffix(hostname, "."))
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
 	}
-	return strings.Join(parts[len(parts)-2:], ".")
+	if net.ParseIP(host) != nil {
+		return host
+	}
+	if base, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil {
+		return base
+	}
+	return host
+}
+
+// normalizeDomain turns a -domain value like "https://Example.com/" or
+// "*.example.com" into a bare lowercase domain.
+func normalizeDomain(d string) string {
+	d = strings.ToLower(strings.TrimSpace(d))
+	if strings.Contains(d, "://") {
+		if u, err := url.Parse(d); err == nil {
+			d = u.Hostname()
+		}
+	}
+	d = strings.TrimPrefix(d, "*.")
+	return strings.Trim(d, ".")
+}
+
+var validHostnamePattern = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
+
+// Object-storage endpoints. A non-empty first capture group is the bucket
+// name in virtual-hosted style; an empty one means path-style, where the
+// bucket is the first path segment.
+var cloudStoragePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^(?:(.+)\.)?s3(?:[.-][a-z0-9-]+)*\.amazonaws\.com(?:\.cn)?$`),
+	regexp.MustCompile(`^(?:(.+)\.)?storage\.googleapis\.com$`),
+	regexp.MustCompile(`^()storage\.cloud\.google\.com$`),
+	regexp.MustCompile(`^()firebasestorage\.googleapis\.com$`),
+	regexp.MustCompile(`^(.+)\.firebasestorage\.app$`),
+	regexp.MustCompile(`^(.+)\.blob\.core\.windows\.net$`),
+	regexp.MustCompile(`^(.+)\.(?:[a-z0-9-]+\.)?digitaloceanspaces\.com$`),
+	regexp.MustCompile(`^(.+)\.r2\.cloudflarestorage\.com$`),
+	regexp.MustCompile(`^(.+)\.r2\.dev$`),
+}
+
+// Third-party hosts that appear in nearly every bundle (XML namespaces,
+// React's error decoder) and carry no signal.
+var noiseBaseDomains = map[string]struct{}{
+	"w3.org":      {},
+	"schema.org":  {},
+	"reactjs.org": {},
+	"react.dev":   {},
+}
+
+// bucketRef reports whether host is a cloud object-storage endpoint and, if
+// so, returns a reference to the bucket: the host itself for virtual-hosted
+// style, or host/bucket for path-style URLs when the path names one.
+func bucketRef(host, firstPathSegment string) (string, bool) {
+	for _, p := range cloudStoragePatterns {
+		m := p.FindStringSubmatch(host)
+		if m == nil {
+			continue
+		}
+		if m[1] == "" && firstPathSegment != "" {
+			return host + "/" + firstPathSegment, true
+		}
+		return host, true
+	}
+	return "", false
+}
+
+// classifyHost assigns a severity to a hostname found in JS. Hosts on the
+// target domain are the interesting ones (sibling APIs, staging, admin
+// panels); the apex itself is low since nearly every site references it.
+// ok is false for hosts that shouldn't be reported at all: the page being
+// scanned and known-noise third parties.
+func classifyHost(host string, t scanTarget) (severity string, ok bool) {
+	if host == t.host {
+		return "", false
+	}
+	if t.domain != "" {
+		if host == t.domain {
+			return "low", true
+		}
+		if strings.HasSuffix(host, "."+t.domain) {
+			return "high", true
+		}
+	}
+	if _, noisy := noiseBaseDomains[extractBaseDomain(host)]; noisy {
+		return "", false
+	}
+	return "info", true
 }

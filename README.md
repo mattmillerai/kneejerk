@@ -5,6 +5,7 @@ Kneejerk is a pentesting command line tool for scanning environment variables an
 ## Features
 * Scans JavaScript files of a provided URL for environment variables.
 * Performs API endpoint enumeration throughout React codebase
+* Extracts hostnames referenced in JS bundles and source maps, flagging the target's own subdomains (internal APIs, staging, admin) and cloud storage buckets
 * Outputs found env variables and API endpoints to the console or to a specified file.
 
 ## Installation
@@ -70,19 +71,48 @@ subfinder -d example.com | httpx | nuclei | kneejerk
 [tech-detect:nginx] [http] [info] https://app.example.com
 ```
 
+#### Hostname extraction
+Hostnames found in JS bundles and source-map `sourcesContent` are classified against the target domain, which is inferred from each scanned URL (`app.example.com` → `example.com`, `www.example.co.uk` → `example.co.uk`) or set with `-domain`:
+
+| Severity | Type | Meaning |
+|----------|------|---------|
+| high | `domain` | Subdomain of the target (`staging-api.example.com`, `admin.example.com`) |
+| medium | `bucket` | Cloud storage: S3, GCS, Azure Blob, DigitalOcean Spaces, R2, Firebase Storage, `s3://` / `gs://` URIs |
+| low | `domain` | The target's apex domain itself |
+| info | `domain` | Third-party hosts |
+
+The scanned host itself and ubiquitous noise (`w3.org`, `reactjs.org`, ...) aren't reported. Third-party hosts are only picked up from absolute URLs; on-domain hosts are also found as bare strings.
+
+```bash
+kneejerk -u https://www.example.com -domain example.com
+```
+```angular2html
+[kneejerk] [domain] [high] https://www.example.com/static/js/main.js [staging-api.example.com]
+[kneejerk] [bucket] [medium] https://www.example.com/static/js/main.js [example-uploads.s3.amazonaws.com]
+[kneejerk] [domain] [info] https://www.example.com/static/js/main.js [js.stripe.com]
+[kneejerk] [domain] [high] https://www.example.com/static/js/main.js.map [admin.example.com]
+```
+
 #### Flags/Options
 ```angular2html
 Kneejerk - A tool for scanning environment variables in .js files
 
 optional arguments:
+  -cookie string
+        Cookie header value to send (e.g. cf_clearance=... from a browser session)
   -debug
         Print debugging statements
+  -domain string
+        Target domain for classifying hostnames found in JS (default: inferred from each scanned URL)
+  -k    Skip TLS certificate verification (insecure)
   -l string
         Path to a file containing a list of URLs to scan
   -o string
         Path to output file
   -u string
         URL of the website to scan
+  -ua string
+        User-Agent header to send
 ```
 
 ## Contributing
