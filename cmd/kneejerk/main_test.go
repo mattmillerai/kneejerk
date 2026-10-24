@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -356,4 +358,239 @@ func TestScrapeJSFilesHostnames(t *testing.T) {
 			t.Errorf("missing %q in output:\n%s", want, got)
 		}
 	}
+}
+
+// cookieRecorder wraps a handler and records the Cookie header of every
+// request by path.
+type cookieRecorder struct {
+	mu      sync.Mutex
+	cookies map[string][]string
+	next    http.Handler
+}
+
+func newCookieRecorder(next http.Handler) *cookieRecorder {
+	return &cookieRecorder{cookies: map[string][]string{}, next: next}
+}
+
+func (c *cookieRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	c.mu.Lock()
+	c.cookies[r.URL.Path] = append(c.cookies[r.URL.Path], r.Header.Get("Cookie"))
+	c.mu.Unlock()
+	c.next.ServeHTTP(w, r)
+}
+
+func (c *cookieRecorder) get(path string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.cookies[path]...)
+}
+
+func (c *cookieRecorder) all() map[string][]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := map[string][]string{}
+	for k, v := range c.cookies {
+		out[k] = append([]string(nil), v...)
+	}
+	return out
+}
+
+func setCookieHeader(t *testing.T, v string) {
+	t.Helper()
+	oldHeader, oldOrigin := cookieHeader, cookieOrigin
+	cookieHeader = v
+	t.Cleanup(func() {
+		cookieHeader = oldHeader
+		cookieOrigin = oldOrigin
+	})
+}
+
+func TestCookieOnlySentToTargetOrigin(t *testing.T) {
+	captureOutput(t)
+	setCookieHeader(t, "session=secret")
+
+	otherMux := http.NewServeMux()
+	otherMux.HandleFunc("/static/third.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("var x=1;\n"))
+	})
+	otherMux.HandleFunc("/static/app.js.map", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"sourcesContent":[]}`))
+	})
+	otherRec := newCookieRecorder(otherMux)
+	other := httptest.NewServer(otherRec)
+	defer other.Close()
+
+	targetMux := http.NewServeMux()
+	targetMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<html><script src="/static/app.js"></script><script src="` + other.URL + `/static/third.js"></script></html>`))
+	})
+	targetMux.HandleFunc("/static/app.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("var y=2;\n//# sourceMappingURL=" + other.URL + "/static/app.js.map\n"))
+	})
+	targetRec := newCookieRecorder(targetMux)
+	target := httptest.NewServer(targetRec)
+	defer target.Close()
+
+	scrapeJSFiles(target.URL, false)
+
+	for _, path := range []string{"/", "/static/app.js"} {
+		if got := targetRec.get(path); !reflect.DeepEqual(got, []string{"session=secret"}) {
+			t.Errorf("target %s cookies = %q, want [session=secret]", path, got)
+		}
+	}
+	otherGot := otherRec.all()
+	for _, path := range []string{"/static/third.js", "/static/app.js.map"} {
+		if len(otherGot[path]) == 0 {
+			t.Errorf("other server never received %s", path)
+		}
+	}
+	for path, cookies := range otherGot {
+		for _, c := range cookies {
+			if c != "" {
+				t.Errorf("other server %s got Cookie %q, want none", path, c)
+			}
+		}
+	}
+}
+
+func TestCookieStrippedOnCrossOriginRedirect(t *testing.T) {
+	setCookieHeader(t, "session=secret")
+
+	otherRec := newCookieRecorder(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	other := httptest.NewServer(otherRec)
+	defer other.Close()
+
+	targetMux := http.NewServeMux()
+	targetMux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/landed", http.StatusFound)
+	})
+	targetMux.HandleFunc("/same", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/final", http.StatusFound)
+	})
+	targetMux.HandleFunc("/final", func(w http.ResponseWriter, r *http.Request) {})
+	targetRec := newCookieRecorder(targetMux)
+	target := httptest.NewServer(targetRec)
+	defer target.Close()
+
+	cookieOrigin = originOf(target.URL)
+
+	if _, err := fetchBody(target.URL + "/start"); err != nil {
+		t.Fatalf("fetchBody(/start): %v", err)
+	}
+	if got := otherRec.get("/landed"); !reflect.DeepEqual(got, []string{""}) {
+		t.Errorf("cross-origin redirect target cookies = %q, want one request without Cookie", got)
+	}
+
+	if _, err := fetchBody(target.URL + "/same"); err != nil {
+		t.Fatalf("fetchBody(/same): %v", err)
+	}
+	if got := targetRec.get("/final"); !reflect.DeepEqual(got, []string{"session=secret"}) {
+		t.Errorf("same-origin redirect target cookies = %q, want [session=secret]", got)
+	}
+}
+
+func TestCheckRedirectLimit(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	if err := checkRedirect(req, make([]*http.Request, 9)); err != nil {
+		t.Errorf("checkRedirect with 9 prior requests = %v, want nil", err)
+	}
+	if err := checkRedirect(req, make([]*http.Request, 10)); err == nil {
+		t.Error("checkRedirect with 10 prior requests = nil, want error")
+	}
+}
+
+func TestOriginOf(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"https://Example.COM/path?q=1", "https://example.com:443"},
+		{"https://example.com:443/", "https://example.com:443"},
+		{"HTTP://example.com", "http://example.com:80"},
+		{"http://example.com:80/x", "http://example.com:80"},
+		{"http://example.com:8080/x", "http://example.com:8080"},
+		{"http://127.0.0.1:1234", "http://127.0.0.1:1234"},
+		{"/relative/path", ""},
+		{"://bad", ""},
+		{"http://[::1", ""},
+	}
+	for _, tt := range tests {
+		if got := originOf(tt.in); got != tt.want {
+			t.Errorf("originOf(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+
+	if originOf("https://example.com") == originOf("https://sub.example.com") {
+		t.Error("subdomain must not share the target origin")
+	}
+	if originOf("http://example.com") == originOf("https://example.com") {
+		t.Error("scheme must be part of the origin")
+	}
+}
+
+func TestInsecureTransportKeepsProxy(t *testing.T) {
+	tr := insecureTransport()
+	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
+		t.Fatal("insecureTransport() must set TLSClientConfig.InsecureSkipVerify")
+	}
+	if tr.Proxy == nil {
+		t.Fatal("insecureTransport() dropped Proxy")
+	}
+	// ProxyFromEnvironment caches the environment process-wide on first use,
+	// so compare function identity rather than setting HTTP_PROXY.
+	if reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(http.ProxyFromEnvironment).Pointer() {
+		t.Error("insecureTransport().Proxy is not http.ProxyFromEnvironment")
+	}
+	if def := http.DefaultTransport.(*http.Transport); def.TLSClientConfig != nil && def.TLSClientConfig.InsecureSkipVerify {
+		t.Error("insecureTransport() mutated http.DefaultTransport")
+	}
+}
+
+// TestInsecureTransportUsesProxyEnv re-execs the test binary so the child's
+// ProxyFromEnvironment cache is populated from a controlled HTTP_PROXY.
+func TestInsecureTransportUsesProxyEnv(t *testing.T) {
+	var (
+		mu  sync.Mutex
+		got []string
+	)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = append(got, r.RequestURI)
+		mu.Unlock()
+	}))
+	defer proxy.Close()
+
+	var env []string
+	for _, kv := range os.Environ() {
+		switch strings.ToUpper(strings.SplitN(kv, "=", 2)[0]) {
+		case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "REQUEST_METHOD":
+			continue
+		}
+		env = append(env, kv)
+	}
+	env = append(env, "GO_WANT_PROXY_CHILD=1",
+		"HTTP_PROXY="+proxy.URL, "http_proxy="+proxy.URL, "NO_PROXY=", "no_proxy=")
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestInsecureTransportUsesProxyEnvChild$")
+	cmd.Env = env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child failed: %v\n%s", err, out)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(got, []string{"http://example.invalid/"}) {
+		t.Errorf("proxy received %q, want [http://example.invalid/]", got)
+	}
+}
+
+func TestInsecureTransportUsesProxyEnvChild(t *testing.T) {
+	if os.Getenv("GO_WANT_PROXY_CHILD") != "1" {
+		t.Skip("helper for TestInsecureTransportUsesProxyEnv")
+	}
+	client := &http.Client{Transport: insecureTransport()}
+	resp, err := client.Get("http://example.invalid/")
+	if err != nil {
+		t.Fatalf("GET via proxy: %v", err)
+	}
+	resp.Body.Close()
 }

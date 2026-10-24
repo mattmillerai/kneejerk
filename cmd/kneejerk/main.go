@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
@@ -63,6 +64,58 @@ var userAgent = defaultUserAgent
 // Optional Cookie header value, e.g. a cf_clearance grabbed from a real browser
 // after solving a Cloudflare challenge.
 var cookieHeader string
+
+// Origin (see originOf) of the scan target; cookieHeader is only ever sent to
+// this exact origin.
+var cookieOrigin string
+
+// originOf returns the lowercased scheme://host:port of rawURL with default
+// ports made explicit, or "" if rawURL can't be parsed.
+func originOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	port := u.Port()
+	if port == "" {
+		switch scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	return scheme + "://" + strings.ToLower(u.Hostname()) + ":" + port
+}
+
+// sendsCookieTo reports whether cookieHeader may be sent to targetURL.
+func sendsCookieTo(targetURL string) bool {
+	return cookieOrigin != "" && originOf(targetURL) == cookieOrigin
+}
+
+// checkRedirect keeps net/http's default 10-redirect limit and drops the
+// Cookie header when a redirect leaves the cookie origin.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if !sendsCookieTo(req.URL.String()) {
+		req.Header.Del("Cookie")
+	}
+	return nil
+}
+
+// insecureTransport is http.DefaultTransport (proxy support, timeouts, HTTP/2)
+// with TLS certificate verification disabled.
+func insecureTransport() *http.Transport {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if tr.TLSClientConfig == nil {
+		tr.TLSClientConfig = &tls.Config{}
+	}
+	tr.TLSClientConfig.InsecureSkipVerify = true
+	return tr
+}
 
 // Pattern for JS bundle files. Anchored at the end and allowing a query string,
 // matches both classic .js and ES-module .mjs extensions.
@@ -216,7 +269,7 @@ func scrapeHostnames(jsURL string, jsContent string, t scanTarget, debug bool) {
 
 var outputFileWriter *bufio.Writer = nil
 
-var httpClient = &http.Client{Timeout: 30 * time.Second}
+var httpClient = &http.Client{Timeout: 30 * time.Second, CheckRedirect: checkRedirect}
 
 // Regex to find environment variables directly assigned. Covers the standard
 // build-time prefixes for the major JS frameworks: Node, CRA (REACT_APP_),
@@ -318,7 +371,7 @@ func fetchBody(targetURL string) ([]byte, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	if cookieHeader != "" {
+	if cookieHeader != "" && sendsCookieTo(targetURL) {
 		req.Header.Set("Cookie", cookieHeader)
 	}
 
@@ -337,6 +390,7 @@ func fetchBody(targetURL string) ([]byte, error) {
 
 func scrapeJSFiles(u string, debug bool) {
 	cleanUrl := removeANSI(u)
+	cookieOrigin = originOf(cleanUrl)
 
 	body, err := fetchBody(cleanUrl)
 	if err != nil {
@@ -434,7 +488,7 @@ func main() {
 	printBanner()
 
 	if *insecure {
-		httpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+		httpClient.Transport = insecureTransport()
 	}
 	userAgent = *ua
 	cookieHeader = *cookie
