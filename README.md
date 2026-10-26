@@ -1,3 +1,30 @@
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=28&pause=1000&color=FF9900&center=true&vCenter=true&width=500&lines=kneejerk" alt="kneejerk" />
+</p>
+
+<p align="center">
+<pre align="center">
+     __                   _         __
+    / /__ ___  ___ ___   (_)__ ____/ /__
+   /  '_// _ \/ -_) -_) / / -_) __/  '_/
+  /_/\_\/_//_/\__/\__/_/ /\__/_/ /_/\_\
+                    |___/
+</pre>
+</p>
+
+<p align="center">
+  <strong>Fast Env Var, API Endpoint &amp; Hostname Extraction from JavaScript Bundles for Pentesters &amp; Red Teamers</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/mattmillerai/kneejerk/releases/latest"><img src="https://img.shields.io/github/v/release/mattmillerai/kneejerk?color=ff9900&style=flat-square" alt="Latest Release"></a>
+  <a href="https://github.com/mattmillerai/kneejerk/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/mattmillerai/kneejerk/ci.yml?label=tests&style=flat-square" alt="Tests"></a>
+  <a href="https://github.com/mattmillerai/kneejerk/blob/main/LICENSE"><img src="https://img.shields.io/github/license/mattmillerai/kneejerk?style=flat-square" alt="License"></a>
+  <img src="https://img.shields.io/github/go-mod/go-version/mattmillerai/kneejerk?style=flat-square&logo=go" alt="Go Version">
+</p>
+
+---
+
 # Kneejerk
 
 Kneejerk is a pentesting command line tool for scanning environment variables and other information from React websites.
