@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=28&pause=1000&color=FF9900&center=true&vCenter=true&width=500&lines=kneejerk" alt="kneejerk" />
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=28&pause=1000&color=FF9900&center=true&vCenter=true&width=320&repeat=false&lines=kneejerk" alt="kneejerk" />
 </p>
 
-<p align="center">
-<pre align="center">
-     __                   _         __
-    / /__ ___  ___ ___   (_)__ ____/ /__
-   /  '_// _ \/ -_) -_) / / -_) __/  '_/
-  /_/\_\/_//_/\__/\__/_/ /\__/_/ /_/\_\
-                    |___/
+<div align="center">
+<pre>
+ _                 _         _   
+| |___ _  ___ ___ (_)___ _ _| |__
+| / / ' \/ -_) -_)| / -_) '_| / /
+|_\_\_||_\___\___|/ \___|_| |_\_\
+                |__/             
 </pre>
-</p>
+</div>
 
 <p align="center">
   <strong>Fast Env Var, API Endpoint &amp; Hostname Extraction from JavaScript Bundles for Pentesters &amp; Red Teamers</strong>
@@ -25,9 +25,7 @@
 
 ---
 
-# Kneejerk
-
-Kneejerk is a pentesting command line tool for scanning environment variables and other information from React websites.
+Kneejerk is a pentesting command line tool that scans a website's JavaScript bundles, and the source maps they reference, for hostnames, environment variables and API endpoints. Hostnames are classified against the target domain, flagging its own subdomains (internal APIs, staging, admin) and cloud storage buckets. Use `-cookie` to scan sites that sit behind a browser session or a Cloudflare challenge.
 
 ## Features
 * Scans JavaScript files of a provided URL for environment variables.
