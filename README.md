@@ -28,10 +28,13 @@
 Kneejerk is a pentesting command line tool that scans a website's JavaScript bundles, and the source maps they reference, for hostnames, environment variables and API endpoints. Hostnames are classified against the target domain, flagging its own subdomains (internal APIs, staging, admin) and cloud storage buckets. Use `-cookie` to scan sites that sit behind a browser session or a Cloudflare challenge.
 
 ## Features
-* Scans JavaScript files of a provided URL for environment variables.
-* Performs API endpoint enumeration throughout React codebase
-* Extracts hostnames referenced in JS bundles and source maps, flagging the target's own subdomains (internal APIs, staging, admin) and cloud storage buckets
-* Outputs found env variables and API endpoints to the console or to a specified file.
+* Scans the JavaScript bundles a page loads (`.js`/`.mjs` under `/static/`, `/_next/static/`, `/assets/`, `/_app/immutable/` or `/_astro/`), which covers React (CRA), Next.js, Vite/Remix, SvelteKit and Astro builds.
+* Extracts build-time environment variables (`NODE_`, `REACT_APP_`, `NEXT_PUBLIC_`, `VITE_`, `EXPO_PUBLIC_` and `AWS_` prefixes) and rates them by severity.
+* Performs API endpoint enumeration throughout the bundles (axios, `fetch`, jQuery `ajax`, `XMLHttpRequest` and `"METHOD", "/path"` style calls).
+* Extracts and classifies hostnames: the target's own subdomains (internal APIs, staging, admin), cloud storage buckets and third-party hosts.
+* Follows `sourceMappingURL` comments and scans the source map's embedded sources too.
+* Sends a `-cookie` header only to the scanned origin, so scans can run behind a browser session or Cloudflare challenge without leaking it to third-party hosts.
+* Outputs findings to the console or to a specified file.
 
 ## Installation
 
@@ -56,6 +59,22 @@ go install -v github.com/mattmillerai/kneejerk/cmd/kneejerk@latest
 kneejerk -u https://www.example.com -o output.txt
 ```
 
+#### List of URLs
+```bash
+kneejerk -l urls.txt
+```
+`urls.txt` holds one URL per line.
+
+#### Session cookie and self-signed certificates
+```bash
+# Send a cookie (e.g. cf_clearance from a browser session) to the scanned site
+kneejerk -u https://www.example.com -cookie 'cf_clearance=...'
+
+# Skip TLS certificate verification (insecure); proxy settings from the environment are still honored
+kneejerk -u https://internal.example.com -k
+```
+The cookie is only sent to the same origin (scheme, host and port) as the URL being scanned, never to third-party scripts or source maps, and is dropped on cross-origin redirects.
+
 #### Version
 ```bash
 kneejerk -version
@@ -72,35 +91,41 @@ subfinder -d example.com | httpx | nuclei | kneejerk
 ```
 
 #### Example Output
-```angular2html
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [NODE_ENV:"production"]
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [REACT_APP_BUILD:"Production"]
-[kneejerk] [js] [high] https://app.example.com/static/js/2.chunk.js [REACT_APP_SECRET:"SECRET"]
-[kneejerk] [js] [high] https://app.example.com/static/js/2.chunk.js [REACT_APP_KEY:"KEY"]
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [REACT_APP_API_HOST:"https://app.example.com"]
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [REACT_APP_WEB_HOST:"WEB_HOST"]
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [REACT_APP_VERSION:"VERSION"]
-[kneejerk] [js] [high] https://app.example.com/static/js/2.chunk.js [REACT_APP_NOT_SECRET_CODE:"NOT_SECRET_CODE"]
-[kneejerk] [js] [medium] https://app.example.com/static/js/2.chunk.js [REACT_APP_CLIENT_DATA_BUCKET_NAME:"client-bucket"]
-[kneejerk] [js] [medium] https://app.example.com/static/js/2.chunk.js [REACT_APP_REGION:"us-east-2"]
+```text
+[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [NODE_ENV:"production"]
+[kneejerk] [env-var] [low] https://app.example.com/static/js/main.js [REACT_APP_API_HOST:"https://api.example.com"]
+[kneejerk] [env-var] [high] https://app.example.com/static/js/main.js [REACT_APP_SECRET:"s3cr3t"]
+[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [NEXT_PUBLIC_REGION:"us-east-2"]
+[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [VITE_BUCKET:"client-bucket"]
+[kneejerk] [api] [info] https://app.example.com/static/js/main.js ["GET", "/api/v1/users"]
+[kneejerk] [api] [info] https://app.example.com/static/js/main.js ["POST", "/api/v1/login"]
+[kneejerk] [domain] [high] https://app.example.com/static/js/main.js [api.example.com]
+[kneejerk] [domain] [high] https://app.example.com/static/js/main.js [staging-api.example.com]
+[kneejerk] [bucket] [medium] https://app.example.com/static/js/main.js [example-uploads.s3.amazonaws.com]
+[kneejerk] [domain] [info] https://app.example.com/static/js/main.js [js.stripe.com]
+[kneejerk] [api] [info] https://app.example.com/static/js/main.js.map ["DELETE", "/api/v1/admin/users"]
+[kneejerk] [domain] [high] https://app.example.com/static/js/main.js.map [admin.example.com]
 ```
 
 #### Example Output w/ nuclei
 
-```bash
-[tech-detect:react] [http] [info] https://app.example.com
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [NODE_ENV:"production"]
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [REACT_APP_BUILD:"Production"]
-[kneejerk] [js] [high] https://app.example.com/static/js/2.chunk.js [REACT_APP_SECRET:"SECRET"]
-[kneejerk] [js] [high] https://app.example.com/static/js/2.chunk.js [REACT_APP_KEY:"KEY"]
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [REACT_APP_API_HOST:"https://app.example.com"]
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [REACT_APP_WEB_HOST:"WEB_HOST"]
-[kneejerk] [js] [info] https://app.example.com/static/js/2.chunk.js [REACT_APP_VERSION:"VERSION"]
-[kneejerk] [js] [high] https://app.example.com/static/js/2.chunk.js [REACT_APP_NOT_SECRET_CODE:"NOT_SECRET_CODE"]
-[kneejerk] [js] [medium] https://app.example.com/static/js/2.chunk.js [REACT_APP_CLIENT_DATA_BUCKET_NAME:"client-bucket"]
-[kneejerk] [js] [medium] https://app.example.com/static/js/2.chunk.js [REACT_APP_REGION:"us-east-2"]
-[tech-detect:google-font-api] [http] [info] https://app.example.com
-[tech-detect:nginx] [http] [info] https://app.example.com
+Reading from stdin expects [nuclei](https://github.com/projectdiscovery/nuclei)-style output lines, where the URL is the fourth space-separated field (`[template] [type] [severity] URL`). Each input line is echoed before its findings. A bare URL on stdin is not accepted (it prints `Invalid input:`), so use `-u` or `-l` for plain URLs.
+
+```text
+[tech-detect:react] [http] [info] https://app.example.com/
+[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [NODE_ENV:"production"]
+[kneejerk] [env-var] [low] https://app.example.com/static/js/main.js [REACT_APP_API_HOST:"https://api.example.com"]
+[kneejerk] [env-var] [high] https://app.example.com/static/js/main.js [REACT_APP_SECRET:"s3cr3t"]
+[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [NEXT_PUBLIC_REGION:"us-east-2"]
+[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [VITE_BUCKET:"client-bucket"]
+[kneejerk] [api] [info] https://app.example.com/static/js/main.js ["GET", "/api/v1/users"]
+[kneejerk] [api] [info] https://app.example.com/static/js/main.js ["POST", "/api/v1/login"]
+[kneejerk] [domain] [high] https://app.example.com/static/js/main.js [api.example.com]
+[kneejerk] [domain] [high] https://app.example.com/static/js/main.js [staging-api.example.com]
+[kneejerk] [bucket] [medium] https://app.example.com/static/js/main.js [example-uploads.s3.amazonaws.com]
+[kneejerk] [domain] [info] https://app.example.com/static/js/main.js [js.stripe.com]
+[kneejerk] [api] [info] https://app.example.com/static/js/main.js.map ["DELETE", "/api/v1/admin/users"]
+[kneejerk] [domain] [high] https://app.example.com/static/js/main.js.map [admin.example.com]
 ```
 
 #### Hostname extraction
@@ -118,7 +143,7 @@ The scanned host itself and ubiquitous noise (`w3.org`, `reactjs.org`, ...) aren
 ```bash
 kneejerk -u https://www.example.com -domain example.com
 ```
-```angular2html
+```text
 [kneejerk] [domain] [high] https://www.example.com/static/js/main.js [staging-api.example.com]
 [kneejerk] [bucket] [medium] https://www.example.com/static/js/main.js [example-uploads.s3.amazonaws.com]
 [kneejerk] [domain] [info] https://www.example.com/static/js/main.js [js.stripe.com]
@@ -126,27 +151,25 @@ kneejerk -u https://www.example.com -domain example.com
 ```
 
 #### Flags/Options
-```angular2html
-Kneejerk - A tool for scanning environment variables in .js files
-
-optional arguments:
+```text
+Usage of kneejerk:
   -cookie string
-        Cookie header value to send (e.g. cf_clearance=... from a browser session)
+    	Cookie header value to send (e.g. cf_clearance=... from a browser session)
   -debug
-        Print debugging statements
+    	Print debugging statements
   -domain string
-        Target domain for classifying hostnames found in JS (default: inferred from each scanned URL)
-  -k    Skip TLS certificate verification (insecure)
+    	Target domain for classifying hostnames found in JS (default: inferred from each scanned URL)
+  -k	Skip TLS certificate verification (insecure)
   -l string
-        Path to a file containing a list of URLs to scan
+    	Path to a file containing a list of URLs to scan
   -o string
-        Path to output file
+    	Path to output file
   -u string
-        URL of the website to scan
+    	URL of the website to scan
   -ua string
-        User-Agent header to send
+    	User-Agent header to send (default "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
   -version
-        Print the version and exit
+    	Print the version and exit
 ```
 
 ## Contributing
