@@ -468,6 +468,21 @@ func scrapeJSFiles(u string, debug bool) {
 	})
 }
 
+// stdinTarget returns the URL to scan from an ANSI-cleaned stdin line.
+// Nuclei-style lines ("[template] [type] [severity] URL ...") yield the
+// fourth field; anything shorter is treated as a bare URL. Blank lines
+// report false so the caller can skip them.
+func stdinTarget(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", false
+	}
+	if fields := strings.Fields(line); len(fields) >= 4 {
+		return fields[3], true
+	}
+	return line, true
+}
+
 func main() {
 	url := flag.String("u", "", "URL of the website to scan")
 	list := flag.String("l", "", "Path to a file containing a list of URLs to scan")
@@ -526,15 +541,14 @@ func main() {
 	} else if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice == 0 {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			fmt.Println(scanner.Text())                // print the input before processing
 			cleanedInput := removeANSI(scanner.Text()) // Remove color codes
-			writeOutput(cleanedInput)
-			urlParts := strings.Split(cleanedInput, " ")
-			if len(urlParts) > 3 {
-				scrapeJSFiles(urlParts[3], *debug)
-			} else {
-				fmt.Println("Invalid input:", cleanedInput)
+			target, ok := stdinTarget(cleanedInput)
+			if !ok {
+				continue
 			}
+			fmt.Println(scanner.Text()) // print the input before processing
+			writeOutput(cleanedInput)
+			scrapeJSFiles(target, *debug)
 		}
 		if err := scanner.Err(); err != nil {
 			fmt.Printf("Error reading from stdin: %v\n", err)
