@@ -594,3 +594,27 @@ func TestInsecureTransportUsesProxyEnvChild(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+func TestStdinTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		line   string
+		want   string
+		wantOK bool
+	}{
+		{"nuclei line", "[tech-detect:react] [http] [info] https://app.example.com/", "https://app.example.com/", true},
+		{"nuclei line with extra whitespace", "  [tech-detect:react]   [http]\t[info]  https://app.example.com/  [extra]", "https://app.example.com/", true},
+		{"bare URL", "https://app.example.com/", "https://app.example.com/", true},
+		{"bare URL with surrounding whitespace", " \thttps://app.example.com/  \n", "https://app.example.com/", true},
+		{"blank line", "", "", false},
+		{"whitespace-only line", " \t  ", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := stdinTarget(tt.line)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("stdinTarget(%q) = (%q, %v), want (%q, %v)", tt.line, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}

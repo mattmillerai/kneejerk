@@ -109,7 +109,7 @@ subfinder -d example.com | httpx | nuclei | kneejerk
 
 #### Example Output w/ nuclei
 
-Reading from stdin expects [nuclei](https://github.com/projectdiscovery/nuclei)-style output lines, where the URL is the fourth space-separated field (`[template] [type] [severity] URL`). Each input line is echoed before its findings. A bare URL on stdin is not accepted (it prints `Invalid input:`), so use `-u` or `-l` for plain URLs.
+Reading from stdin expects [nuclei](https://github.com/projectdiscovery/nuclei)-style output lines, where the URL is the fourth space-separated field (`[template] [type] [severity] URL`). Each input line is echoed before its findings. Bare URLs also work on stdin (e.g. `httpx -silent | kneejerk`): a non-blank line with fewer than four fields is scanned as a plain URL, while nuclei-style lines remain supported. Blank lines are skipped.
 
 ```text
 [tech-detect:react] [http] [info] https://app.example.com/
