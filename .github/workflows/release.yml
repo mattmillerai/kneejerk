@@ -42,8 +42,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
-        run: gh workflow run ci.yml --ref "$BRANCH"
+          PR: ${{ steps.release.outputs.pr }}
+        run: |
+          BRANCH=$(jq -r ".headBranchName // empty" <<<"${PR:-null}")
+          if [ -z "$BRANCH" ]; then echo "no release PR branch, skipping"; exit 0; fi
+          gh workflow run ci.yml --ref "$BRANCH"
 
   goreleaser:
     needs: release-please
