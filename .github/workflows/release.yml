@@ -23,6 +23,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -33,6 +34,16 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      # PRs opened by release-please with GITHUB_TOKEN do not trigger workflow
+      # runs, but workflow_dispatch is exempt from that rule, so we dispatch CI
+      # explicitly on the release PR branch.
+      - name: Dispatch CI on the release PR branch
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+        run: gh workflow run ci.yml --ref "$BRANCH"
 
   goreleaser:
     needs: release-please
