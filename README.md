@@ -178,7 +178,7 @@ I welcome contributions from the community! If you have any suggestions, bug rep
 
 ## Support the project
 
-If you find this project helpful and would like to support its development, please consider donating:  
+If kneejerk saves you time, you can support it on [Buy Me a Coffee](https://www.buymeacoffee.com/yOd1JU9MQe):  
   
 [![Buy me a coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/yOd1JU9MQe)
 
