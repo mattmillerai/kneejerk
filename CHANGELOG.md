@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/mattmillerai/kneejerk/compare/v0.3.3...v0.3.4) (2026-11-01)
+
+
+### Dependencies
+
+* bump golang.org/x/net to v0.62.0 (GO-2026-6860) ([#24](https://github.com/mattmillerai/kneejerk/issues/24)) ([2b88190](https://github.com/mattmillerai/kneejerk/commit/2b88190dc0572f479f1a04aede218bd015690b48))
+
 ## [0.3.3](https://github.com/mattmillerai/kneejerk/compare/v0.3.2...v0.3.3) (2026-10-26)
 
 
