@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/mattmillerai/kneejerk/compare/v0.3.4...v0.3.5) (2026-11-17)
+
+
+### Dependencies
+
+* bump Go toolchain to 1.27.4 (GO-2026-6859) ([#27](https://github.com/mattmillerai/kneejerk/issues/27)) ([b303f2b](https://github.com/mattmillerai/kneejerk/commit/b303f2beaf9a1ac1d5ae9cdef2d2eea5dc90242c))
+
 ## [0.3.4](https://github.com/mattmillerai/kneejerk/compare/v0.3.3...v0.3.4) (2026-11-01)
 
 
