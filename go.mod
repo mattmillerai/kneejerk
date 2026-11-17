@@ -2,7 +2,7 @@ module github.com/mattmillerai/kneejerk
 
 go 1.26.10
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/PuerkitoBio/goquery v1.13.0
