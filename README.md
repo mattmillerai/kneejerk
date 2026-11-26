@@ -44,6 +44,21 @@ Kneejerk is a pentesting command line tool that scans a website's JavaScript bun
 brew install mattmillerai/tap/kneejerk
 ```
 
+### Prebuilt binaries
+
+Linux and macOS archives (amd64 and arm64) are published on the [latest GitHub release](https://github.com/mattmillerai/kneejerk/releases/latest), along with `checksums.txt`. There is no Windows build.
+
+```sh
+# Download the archive for your OS/arch and checksums.txt from the releases page,
+# then (Linux amd64 shown; also darwin_amd64, darwin_arm64, linux_arm64):
+tar xzf kneejerk_*_linux_amd64.tar.gz
+sha256sum -c checksums.txt --ignore-missing   # macOS: shasum -a 256 -c checksums.txt --ignore-missing
+sudo install -m 755 kneejerk /usr/local/bin/
+kneejerk -version
+```
+
+Release archives are stamped with the version. Builds from Homebrew or `go install` currently report `dev` for `kneejerk -version`.
+
 ### Go Install
 
 ```sh
@@ -63,7 +78,15 @@ kneejerk -u https://www.example.com -o output.txt
 ```bash
 kneejerk -l urls.txt
 ```
-`urls.txt` holds one URL per line.
+`urls.txt` holds one bare URL per line.
+
+#### Stdin (bare URLs or nuclei output)
+```bash
+# Bare URLs, one per line (for example, from httpx)
+httpx -silent -l urls.txt | kneejerk
+# or
+kneejerk < urls.txt
+```
 
 #### Session cookie and self-signed certificates
 ```bash
@@ -80,52 +103,53 @@ The cookie is only sent to the same origin (scheme, host and port) as the URL be
 kneejerk -version
 ```
 
-#### Using with [nuclei](https://github.com/projectdiscovery/nuclei)
+#### Using with [nuclei](https://github.com/projectdiscovery/nuclei) and other [Project Discovery](https://github.com/projectdiscovery) tools
 ```bash
+# Nuclei-style lines, where the URL is the fourth space-separated field
 nuclei -u https://www.example.com | kneejerk
-```
 
-#### Chained with other [Project Discovery](https://github.com/projectdiscovery) tools
-```bash
 subfinder -d example.com | httpx | nuclei | kneejerk
 ```
 
-#### Example Output
+#### Example output
+
+The lines below are uncolored findings written by `-o` from a local demo page whose JavaScript bundle (and its source map) contained these values, scanned with `-domain example.com`. Console output is colorized; the line format is the same against a live site.
+
 ```text
-[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [NODE_ENV:"production"]
-[kneejerk] [env-var] [low] https://app.example.com/static/js/main.js [REACT_APP_API_HOST:"https://api.example.com"]
-[kneejerk] [env-var] [high] https://app.example.com/static/js/main.js [REACT_APP_SECRET:"s3cr3t"]
-[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [NEXT_PUBLIC_REGION:"us-east-2"]
-[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [VITE_BUCKET:"client-bucket"]
-[kneejerk] [api] [info] https://app.example.com/static/js/main.js ["GET", "/api/v1/users"]
-[kneejerk] [api] [info] https://app.example.com/static/js/main.js ["POST", "/api/v1/login"]
-[kneejerk] [domain] [high] https://app.example.com/static/js/main.js [api.example.com]
-[kneejerk] [domain] [high] https://app.example.com/static/js/main.js [staging-api.example.com]
-[kneejerk] [bucket] [medium] https://app.example.com/static/js/main.js [example-uploads.s3.amazonaws.com]
-[kneejerk] [domain] [info] https://app.example.com/static/js/main.js [js.stripe.com]
-[kneejerk] [api] [info] https://app.example.com/static/js/main.js.map ["DELETE", "/api/v1/admin/users"]
-[kneejerk] [domain] [high] https://app.example.com/static/js/main.js.map [admin.example.com]
+[kneejerk] [env-var] [info] http://127.0.0.1:8765/static/js/main.js [NODE_ENV: "production"]
+[kneejerk] [env-var] [low] http://127.0.0.1:8765/static/js/main.js [REACT_APP_API_HOST: "https://api.example.com"]
+[kneejerk] [env-var] [high] http://127.0.0.1:8765/static/js/main.js [REACT_APP_SECRET: "s3cr3t"]
+[kneejerk] [env-var] [info] http://127.0.0.1:8765/static/js/main.js [NEXT_PUBLIC_REGION: "us-east-2"]
+[kneejerk] [env-var] [info] http://127.0.0.1:8765/static/js/main.js [VITE_BUCKET: "client-bucket"]
+[kneejerk] [api] [info] http://127.0.0.1:8765/static/js/main.js ["GET", "/api/v1/users"]
+[kneejerk] [api] [info] http://127.0.0.1:8765/static/js/main.js ["POST", "/api/v1/login"]
+[kneejerk] [domain] [high] http://127.0.0.1:8765/static/js/main.js [api.example.com]
+[kneejerk] [domain] [high] http://127.0.0.1:8765/static/js/main.js [staging-api.example.com]
+[kneejerk] [bucket] [medium] http://127.0.0.1:8765/static/js/main.js [example-uploads.s3.amazonaws.com]
+[kneejerk] [domain] [info] http://127.0.0.1:8765/static/js/main.js [js.stripe.com]
+[kneejerk] [api] [info] http://127.0.0.1:8765/static/js/main.js.map ["DELETE", "/api/v1/admin/users"]
+[kneejerk] [domain] [high] http://127.0.0.1:8765/static/js/main.js.map [admin.example.com]
 ```
 
-#### Example Output w/ nuclei
+#### Example output from stdin
 
-Reading from stdin expects [nuclei](https://github.com/projectdiscovery/nuclei)-style output lines, where the URL is the fourth space-separated field (`[template] [type] [severity] URL`). Each input line is echoed before its findings. Bare URLs also work on stdin (e.g. `httpx -silent | kneejerk`): a non-blank line with fewer than four fields is scanned as a plain URL, while nuclei-style lines remain supported. Blank lines are skipped.
+Reading from stdin expects [nuclei](https://github.com/projectdiscovery/nuclei)-style output lines, where the URL is the fourth space-separated field (`[template] [type] [severity] URL`). Each input line is echoed before its findings. Bare URLs also work on stdin (e.g. `httpx -silent | kneejerk` or `kneejerk < urls.txt`): a non-blank line with fewer than four fields is scanned as a plain URL, while nuclei-style lines remain supported. Blank lines are skipped. `-l` is for bare URLs only, one per line, and does not parse nuclei output.
 
 ```text
-[tech-detect:react] [http] [info] https://app.example.com/
-[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [NODE_ENV:"production"]
-[kneejerk] [env-var] [low] https://app.example.com/static/js/main.js [REACT_APP_API_HOST:"https://api.example.com"]
-[kneejerk] [env-var] [high] https://app.example.com/static/js/main.js [REACT_APP_SECRET:"s3cr3t"]
-[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [NEXT_PUBLIC_REGION:"us-east-2"]
-[kneejerk] [env-var] [info] https://app.example.com/static/js/main.js [VITE_BUCKET:"client-bucket"]
-[kneejerk] [api] [info] https://app.example.com/static/js/main.js ["GET", "/api/v1/users"]
-[kneejerk] [api] [info] https://app.example.com/static/js/main.js ["POST", "/api/v1/login"]
-[kneejerk] [domain] [high] https://app.example.com/static/js/main.js [api.example.com]
-[kneejerk] [domain] [high] https://app.example.com/static/js/main.js [staging-api.example.com]
-[kneejerk] [bucket] [medium] https://app.example.com/static/js/main.js [example-uploads.s3.amazonaws.com]
-[kneejerk] [domain] [info] https://app.example.com/static/js/main.js [js.stripe.com]
-[kneejerk] [api] [info] https://app.example.com/static/js/main.js.map ["DELETE", "/api/v1/admin/users"]
-[kneejerk] [domain] [high] https://app.example.com/static/js/main.js.map [admin.example.com]
+[tech-detect:react] [http] [info] http://127.0.0.1:8765/
+[kneejerk] [env-var] [info] http://127.0.0.1:8765/static/js/main.js [NODE_ENV: "production"]
+[kneejerk] [env-var] [low] http://127.0.0.1:8765/static/js/main.js [REACT_APP_API_HOST: "https://api.example.com"]
+[kneejerk] [env-var] [high] http://127.0.0.1:8765/static/js/main.js [REACT_APP_SECRET: "s3cr3t"]
+[kneejerk] [env-var] [info] http://127.0.0.1:8765/static/js/main.js [NEXT_PUBLIC_REGION: "us-east-2"]
+[kneejerk] [env-var] [info] http://127.0.0.1:8765/static/js/main.js [VITE_BUCKET: "client-bucket"]
+[kneejerk] [api] [info] http://127.0.0.1:8765/static/js/main.js ["GET", "/api/v1/users"]
+[kneejerk] [api] [info] http://127.0.0.1:8765/static/js/main.js ["POST", "/api/v1/login"]
+[kneejerk] [domain] [high] http://127.0.0.1:8765/static/js/main.js [api.example.com]
+[kneejerk] [domain] [high] http://127.0.0.1:8765/static/js/main.js [staging-api.example.com]
+[kneejerk] [bucket] [medium] http://127.0.0.1:8765/static/js/main.js [example-uploads.s3.amazonaws.com]
+[kneejerk] [domain] [info] http://127.0.0.1:8765/static/js/main.js [js.stripe.com]
+[kneejerk] [api] [info] http://127.0.0.1:8765/static/js/main.js.map ["DELETE", "/api/v1/admin/users"]
+[kneejerk] [domain] [high] http://127.0.0.1:8765/static/js/main.js.map [admin.example.com]
 ```
 
 #### Hostname extraction
@@ -143,11 +167,14 @@ The scanned host itself and ubiquitous noise (`w3.org`, `reactjs.org`, ...) aren
 ```bash
 kneejerk -u https://www.example.com -domain example.com
 ```
+
+From the same local demo run (`-domain example.com`):
+
 ```text
-[kneejerk] [domain] [high] https://www.example.com/static/js/main.js [staging-api.example.com]
-[kneejerk] [bucket] [medium] https://www.example.com/static/js/main.js [example-uploads.s3.amazonaws.com]
-[kneejerk] [domain] [info] https://www.example.com/static/js/main.js [js.stripe.com]
-[kneejerk] [domain] [high] https://www.example.com/static/js/main.js.map [admin.example.com]
+[kneejerk] [domain] [high] http://127.0.0.1:8765/static/js/main.js [staging-api.example.com]
+[kneejerk] [bucket] [medium] http://127.0.0.1:8765/static/js/main.js [example-uploads.s3.amazonaws.com]
+[kneejerk] [domain] [info] http://127.0.0.1:8765/static/js/main.js [js.stripe.com]
+[kneejerk] [domain] [high] http://127.0.0.1:8765/static/js/main.js.map [admin.example.com]
 ```
 
 #### Flags/Options
@@ -184,4 +211,4 @@ If kneejerk saves you time, you can support it on [Buy Me a Coffee](https://www.
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the [MIT License](LICENSE).
